@@ -1,4 +1,4 @@
-import spotipy
+import spotipy as sp
 from spotipy.oauth2 import SpotifyClientCredentials
 import re
 import pickle
@@ -7,9 +7,11 @@ import numpy as np
 import matplotlib.cm as cm
 from sklearn.ensemble import ExtraTreesClassifier
 
+PASS_SCORE = 22559.3
+
 # initilize spotify connection:
-client_credentials_manager = SpotifyClientCredentials(client_id='87158cc41aa945e0b7be77d94a57efa8', client_secret='fd77db134a3a45b7b3f1fa85f43375b9')
-sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
+# client_credentials_manager = SpotifyClientCredentials(client_id='87158cc41aa945e0b7be77d94a57efa8', client_secret='fd77db134a3a45b7b3f1fa85f43375b9')
+# sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
 
 def get_spotify_features(track_name, artist_name, counter):
@@ -119,7 +121,15 @@ def calc_weights():
     model = ExtraTreesClassifier()
     model.fit(data, tags)
     feature_weights = model.feature_importances_
-    return feature_weights
+    feature_dict = {key: weight for key in features_name for weight in feature_weights}
+    return feature_dict, dict_billboard
+
+
+def compute_single_song_score(song, features, weights, dict_features):
+    score = 0
+    for i in range(len(features)):
+        score += weights[i] * dict_features[song][0][features[i]]
+    return score
 
 
 def compute_score(song_features_dict, feature_weights):
@@ -136,6 +146,66 @@ def compute_score(song_features_dict, feature_weights):
     # print(max(scores))
     # print(np.mean(scores))
     return scores
+
+
+def find_hits_mean(hits, features):
+    """
+    hits of specific genre (pop, hip hop, rap)
+    :return: dict with the mean value of hits for each feature.
+    """
+    dict_hits_features_mean = {f : 0 for f in features}
+    len_of_hits = len(hits)
+    for song in hits:
+        for feature in features:
+            dict_hits_features_mean[feature] += hits[song][0][feature]
+    for feature in features:
+        dict_hits_features_mean[feature] /= len_of_hits
+    return dict_hits_features_mean
+
+
+
+def greedy(song, weight_dict, dict_features, hits_mean_dict, delta=0.04):
+    changes = {}
+    # s_weights = sorted(weight_dict.values())
+    weight_dict['key'] = 0.1
+    weight_dict['mode'] = 0.03
+    s_weights = sorted(weight_dict.items(), key=lambda x:x[1], reverse=True)
+    weights = [weight[1] for weight in s_weights]
+    features = [feature[0] for feature in s_weights]
+    # if compute_single_song_score(song, features, weights, dict_features) - PASS_SCORE >= delta:
+    #     return changes
+    done = False
+    for i in range(len(weights)):
+        original_value = dict_features[song][0][features[i]]
+        current_value = original_value
+        hit_feature_mean = hits_mean_dict[features[i]]
+        # current_value = max(current_value, bottom)
+        # current_value = min(current_value, top)
+        dict_features[song][0][features[i]] = hit_feature_mean
+        prev_value = 0
+        score = compute_single_song_score(song, features, weights, dict_features)
+        # if score - PASS_SCORE < delta:
+        #     dict_features[song][0][features[i]] = hit_feature_mean
+        dict_features[song][0][features[i]] = hit_feature_mean
+
+        # while score - PASS_SCORE >= delta:
+        #     done = True
+        #     prev_value = current_value
+        #     current_value = (current_value + original_value) / 2
+        #     dict_features[song][0][s_weights[i]] = current_value
+        #     score = compute_single_song_score(song, features, weights, dict_features)
+        # if done:
+        #     changes[features[i]] = prev_value - original_value
+        #     dict_features[song][0][features[i]] = prev_value
+        #     print(changes)
+        #     return changes
+        changes[features[i]] = hit_feature_mean - original_value
+    return "You're a failure you cunt"
+
+w_dict, dict_billboard = calc_weights()
+mean = find_hits_mean(dict_billboard, list(w_dict.keys()))
+print(greedy(list(dict_billboard.keys())[0], w_dict, dict_billboard,mean))
+
 
 
 # # TODO:
