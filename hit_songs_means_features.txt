@@ -1,0 +1,16 @@
+accousticness = 0.1528 , arbitrary = 0.3511
+danceability = 0.6531 , arbitrary = 0.5455
+duration_ms = 0.2322 , arbitrary = 0.2384
+energy = 0.6944, arbitrary = 0.5932
+
+key: [0.10614152 0.13684913 0.08344459 0.02069426 0.06809079 0.07343124
+      0.07276368 0.1141522  0.08077437 0.08744993 0.07810414 0.07810414]
+
+liveness = 0.1778, arbitrary = 0.2204
+loudness = 0.0992, arbitrary = 0.1637
+
+mode: [0.33578104 0.66421896]
+
+speechiness = 0.1124, arbitrary = 0.094
+tempo = 0.4805, arbitrary = 0.4797
+valance = 0.5447, arbitrary = 0.5284
