@@ -1,5 +1,5 @@
-import spotipy as sp
-from spotipy.oauth2 import SpotifyClientCredentials
+# import spotipy as sp
+# from spotipy.oauth2 import SpotifyClientCredentials
 import re
 import pickle
 import matplotlib.pyplot as plt
@@ -14,17 +14,17 @@ PASS_SCORE = 22559.3
 # sp = spotipy.Spotify(client_credentials_manager=client_credentials_manager)
 
 
-def get_spotify_features(track_name, artist_name, counter):
-    # conter: number of unfound songs
-    track = sp.search(q='artist:' + artist_name + ' track:' + track_name, type='track', limit=1)
-
-    if len(track['tracks']['items']) == 0:
-        counter += 1
-        return counter, None
-
-    id = track['tracks']['items'][0]['id']
-    features = sp.audio_features(id)
-    return counter, features
+# def get_spotify_features(track_name, artist_name, counter):
+#     # conter: number of unfound songs
+#     track = sp.search(q='artist:' + artist_name + ' track:' + track_name, type='track', limit=1)
+#
+#     if len(track['tracks']['items']) == 0:
+#         counter += 1
+#         return counter, None
+#
+#     id = track['tracks']['items'][0]['id']
+#     features = sp.audio_features(id)
+#     return counter, features
 
 
 # saves dictionary object to memory
@@ -85,6 +85,15 @@ def create_dict_features_arbitrary(name_of_list_in_memory):
         all_songs += 1
     save_obj(dict_songs, 'arbitrary_songs_features_dict')
 
+def linearRegression(M, Y):
+    """
+    Returns the prediction vector.
+    M is a matrix of samples, where each line is a sample and his differente features,
+    Y is the vector which indicates if the sample is healthy or not.
+    """
+
+    return np.dot(np.linalg.pinv(M), Y)
+
 
 def calc_weights():
     features_name = ['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness',
@@ -105,46 +114,58 @@ def calc_weights():
             tag = 0 #not hit
         features = []
         for feature in features_name:
-            features.append(dict_all_songs[song][0][feature])
+            if feature == 'duration_ms':
+                features.append(dict_all_songs[song][0][feature] / 60000)
+                dict_all_songs[song][0][feature] /= 60000
+            else:
+                features.append(dict_all_songs[song][0][feature])
         data.append(features)
         tags.append(tag)
     for song in dict_billboard:
         tag = 1
         features = []
         for feature in features_name:
-            features.append(dict_billboard[song][0][feature])
+            if feature == 'duration_ms':
+                features.append(dict_billboard[song][0][feature] / 60000)
+                dict_billboard[song][0][feature] /= 60000
+            else:
+                features.append(dict_billboard[song][0][feature])
         data.append(features)
         tags.append(tag)
     data = np.array(data)
     tags = np.array(tags)
 
+    rl = linearRegression(data, tags)
     model = ExtraTreesClassifier()
     model.fit(data, tags)
     feature_weights = model.feature_importances_
-    feature_dict = {key: weight for key in features_name for weight in feature_weights}
-    return feature_dict, dict_billboard
+    feature_weights = rl
+    feature_dict = {}
+    for i in range(len(features_name)):
+        feature_dict[features_name[i]] = feature_weights[i]
+    # feature_dict = {key: weight for key in features_name for weight in feature_weights}
+    return feature_dict, dict_billboard, dict_all_songs
 
 
-def compute_single_song_score(song, features, weights, dict_features):
+def compute_single_song_score(song, features, weights, dict_features, opt_weights):
     score = 0
     for i in range(len(features)):
-        score += weights[i] * dict_features[song][0][features[i]]
+        score += weights[i] * abs(dict_features[song][0][features[i]] - opt_weights[features[i]])
     return score
 
 
 def compute_score(song_features_dict, feature_weights):
-    dict_features = load_obj(song_features_dict)
+    dict_features = song_features_dict
     features_name = ['danceability', 'energy', 'key', 'loudness', 'mode', 'speechiness', 'acousticness',
                      'liveness', 'valence', 'tempo', 'duration_ms']
+    mean = find_hits_mean(dict_billboard, list(w_dict.keys()))
     scores = []
     for song in dict_features.keys():
-        score = 0
+        # score = 0
         for i in range(len(features_name)):
-            score += feature_weights[i] * dict_features[song][0][features_name[i]]
+            score = compute_single_song_score(song, features_name, feature_weights, dict_features, mean)
+            # score += feature_weights[i] * dict_features[song][0][features_name[i]]
         scores.append(score)
-    # print(min(scores))
-    # print(max(scores))
-    # print(np.mean(scores))
     return scores
 
 
@@ -154,6 +175,7 @@ def find_hits_mean(hits, features):
     :return: dict with the mean value of hits for each feature.
     """
     dict_hits_features_mean = {f : 0 for f in features}
+    dict_hits_score = {f : 0 for f in features}
     len_of_hits = len(hits)
     for song in hits:
         for feature in features:
@@ -164,11 +186,9 @@ def find_hits_mean(hits, features):
 
 
 
-def greedy(song, weight_dict, dict_features, hits_mean_dict, delta=0.04):
+def greedy(song, weight_dict, dict_features, hits_mean_dict, rng=(0.04415809256636373, 0.06413266371976678)):
     changes = {}
     # s_weights = sorted(weight_dict.values())
-    weight_dict['key'] = 0.1
-    weight_dict['mode'] = 0.03
     s_weights = sorted(weight_dict.items(), key=lambda x:x[1], reverse=True)
     weights = [weight[1] for weight in s_weights]
     features = [feature[0] for feature in s_weights]
@@ -179,32 +199,40 @@ def greedy(song, weight_dict, dict_features, hits_mean_dict, delta=0.04):
         original_value = dict_features[song][0][features[i]]
         current_value = original_value
         hit_feature_mean = hits_mean_dict[features[i]]
-        # current_value = max(current_value, bottom)
-        # current_value = min(current_value, top)
         dict_features[song][0][features[i]] = hit_feature_mean
-        prev_value = 0
-        score = compute_single_song_score(song, features, weights, dict_features)
-        # if score - PASS_SCORE < delta:
-        #     dict_features[song][0][features[i]] = hit_feature_mean
+        score = compute_single_song_score(song, features, weights, dict_features, hits_mean_dict)
         dict_features[song][0][features[i]] = hit_feature_mean
 
-        # while score - PASS_SCORE >= delta:
-        #     done = True
-        #     prev_value = current_value
-        #     current_value = (current_value + original_value) / 2
-        #     dict_features[song][0][s_weights[i]] = current_value
-        #     score = compute_single_song_score(song, features, weights, dict_features)
-        # if done:
-        #     changes[features[i]] = prev_value - original_value
-        #     dict_features[song][0][features[i]] = prev_value
-        #     print(changes)
-        #     return changes
         changes[features[i]] = hit_feature_mean - original_value
+        if score in range(rng):
+            return changes
     return "You're a failure you cunt"
 
-w_dict, dict_billboard = calc_weights()
+w_dict, dict_billboard, dict_all_songs = calc_weights()
 mean = find_hits_mean(dict_billboard, list(w_dict.keys()))
 print(greedy(list(dict_billboard.keys())[0], w_dict, dict_billboard,mean))
+hits = (compute_score(dict_billboard, list(w_dict.values())))
+
+mnH = np.mean(hits)
+print("mean Hits: " + str(mnH))
+print(max(hits))
+print(min(hits))
+
+songs = compute_score(dict_all_songs, list(w_dict.values()))
+mnS = np.mean(songs)
+print("mean songs: " + str(mnS))
+print("max: " + str(max(songs)))
+print(min(songs))
+
+std = np.std(hits)
+
+print("hits std: " + str(std))
+stdS = np.std(songs)
+print("songs std: " + str(stdS))
+
+print(len(songs))
+print(len([x for x in songs if x < mnH + 0.25*std and x > mnH - 0.25*std]))
+print("range = " + " min : " + str(mnH - 0.25*std) + " max : " + str(mnH + 0.25*std))
 
 
 
